@@ -1,16 +1,3 @@
-#ifdef _MSC_VER
-#include <Windows.h>
-#define _SCL_SECURE_NO_WARNINGS
-
-#define strcasecmp _stricmp
-#define strncasecmp _strnicmp
-
-#define wcsncasecmp(a,b,l) lstrcmpiW(a,b)
-#endif
-
-#include <boost/regex.hpp>
-#include <boost/lexical_cast.hpp> 
-
 template<typename CharType> const CharType* comment_tag_string();
 template<> const char* comment_tag_string<char>(){ return "<!--"; }
 template<> const wchar_t* comment_tag_string<wchar_t>(){ return L"<!--"; }
@@ -83,19 +70,19 @@ html::basic_selector<CharType>::basic_selector(std::basic_string<CharType>&&s)
 template html::basic_selector<char>::basic_selector(std::basic_string<char>&&s);
 template html::basic_selector<wchar_t>::basic_selector(std::basic_string<wchar_t>&&s);
 
-static bool strcmp_ignore_case(const std::string& a, const std::string& b)
+template<typename CharType>
+bool strcmp_ignore_case(const std::basic_string<CharType>& a, const std::basic_string<CharType>& b)
 {
-	if ( a.size() == b.size())
-		return  strncasecmp(a.c_str(), b.c_str(), a.size()) == 0;
-	return false;
+    return std::equal(a.begin(), a.end(),
+                      b.begin(), b.end(),
+                      [](CharType a, CharType b) {
+                          return std::tolower(a) == std::tolower(b);
+                      });
 }
 
-static bool strcmp_ignore_case(const std::wstring& a, const std::wstring& b)
-{
-	if ( a.size() == b.size())
-		return wcsncasecmp(a.c_str(), b.c_str(), a.size() * sizeof(wchar_t)) == 0;
-	return false;
-}
+
+template bool strcmp_ignore_case(const std::basic_string<char>& a, const std::basic_string<char>& b);
+template bool strcmp_ignore_case(const std::basic_string<wchar_t>& a, const std::basic_string<wchar_t>& b);
 
 
 /*
@@ -309,8 +296,6 @@ html::basic_dom<CharType>::basic_dom(html::basic_dom<CharType>&& d)
 	, content_text(std::move(d.content_text))
 	, m_parent(std::move(d.m_parent))
 	, children(std::move(d.children))
-	, html_parser_feeder(std::move(d.html_parser_feeder))
-	, html_parser_feeder_inialized(std::move(d.html_parser_feeder_inialized))
 {
 }
 
@@ -324,7 +309,6 @@ html::basic_dom<CharType>::basic_dom(const html::basic_dom<CharType>& d)
 	, content_text(d.content_text)
 	, m_parent(d.m_parent)
 	, children(d.children)
-	, html_parser_feeder_inialized(false)
 {
 }
 
@@ -339,7 +323,6 @@ html::basic_dom<CharType>& html::basic_dom<CharType>::operator=(const html::basi
 	content_text = d.content_text;
 	m_parent = d.m_parent;
 	children = d.children;
-	html_parser_feeder_inialized = false;
 	return *this;
 }
 
@@ -354,7 +337,6 @@ html::basic_dom<CharType>& html::basic_dom<CharType>::operator=(html::basic_dom<
 	content_text = std::move(d.content_text);
 	m_parent = std::move(d.m_parent);
 	children = std::move(d.children);
-	html_parser_feeder_inialized = false;
 	return *this;
 }
 
@@ -366,6 +348,7 @@ html::detail::basic_dom_node_parser<CharType>::basic_dom_node_parser(html::basic
 	: m_dom(domer)
 	, m_str(str)
 {
+	m_dom->node_parser = this;
 }
 
 template html::detail::basic_dom_node_parser<char>::basic_dom_node_parser(html::basic_dom<char>* domer, const std::basic_string<char>& str);
@@ -377,8 +360,6 @@ html::detail::basic_dom_node_parser<CharType>::basic_dom_node_parser(const basic
 	, m_callback(other.m_callback)
 {
 	m_dom = nullptr;
-	int a = 0;
-	a = 2;
 }
 
 template html::detail::basic_dom_node_parser<char>::basic_dom_node_parser(const basic_dom_node_parser& other);
@@ -388,7 +369,6 @@ template<typename CharType>
 html::detail::basic_dom_node_parser<CharType>::basic_dom_node_parser(basic_dom_node_parser&& other)
 	: m_str(other.m_str)
 	, m_callback(std::move(other.m_callback))
-	, m_sig_connection(std::move(other.m_sig_connection))
 {
 	m_dom = other.m_dom;
 	other.m_dom = nullptr;
@@ -400,10 +380,10 @@ template html::detail::basic_dom_node_parser<wchar_t>::basic_dom_node_parser(bas
 template<typename CharType>
 html::detail::basic_dom_node_parser<CharType>::~basic_dom_node_parser()
 {
-	if (m_dom)
-		m_dom->html_parser_feeder(&m_str);
-	if (m_sig_connection.connected())
-		m_sig_connection.disconnect();
+	if (m_dom) {
+		m_dom->html_parser(&m_str);
+		m_dom->node_parser = nullptr;
+	}
 }
 
 template html::detail::basic_dom_node_parser<char>::~basic_dom_node_parser();
@@ -412,16 +392,14 @@ template html::detail::basic_dom_node_parser<wchar_t>::~basic_dom_node_parser();
 template<typename CharType>
 void html::detail::basic_dom_node_parser<CharType>::operator()(tag_stage s, std::shared_ptr<basic_dom<CharType>> nodeptr)
 {
-	if (!m_selector)
+	if (m_selector == nullptr)
 	{
 		if (m_callback)
 			m_callback(s, nodeptr);
 		return;
 	}
 
-	// TODO 执行过滤. 然后对通过的调用回调函数
 	auto macher_it = m_selector->begin();
-
 
 	if ((*macher_it)(*nodeptr))
 	{
@@ -440,8 +418,6 @@ template<typename CharType>
 void html::detail::basic_dom_node_parser<CharType>::set_callback_fuction(std::function<void(tag_stage, std::shared_ptr<html::basic_dom<CharType>>)>&& cb)
 {
 	m_callback = cb;
-	// 在析构的时候自动撤销注册.
-	m_sig_connection = m_dom->m_new_node_signal.connect(*this);
 }
 
 template void html::detail::basic_dom_node_parser<char>::set_callback_fuction(std::function<void(tag_stage, std::shared_ptr<html::basic_dom<char>>)>&& cb);
@@ -460,14 +436,6 @@ template html::detail::basic_dom_node_parser<wchar_t>& html::detail::basic_dom_n
 template<typename CharType>
 html::detail::basic_dom_node_parser<CharType> html::basic_dom<CharType>::append_partial_html(const std::basic_string<CharType>& str)
 {
-	if (!html_parser_feeder_inialized)
-	{
-		html_parser_feeder = decltype(html_parser_feeder)(
-			std::bind(&basic_dom<CharType>::html_parser, this, std::placeholders::_1)
-		);
-		html_parser_feeder_inialized = true;
-	}
-
 	return detail::basic_dom_node_parser<CharType>(this, str);
 }
 
@@ -516,7 +484,7 @@ bool html::basic_selector<CharType>::condition::operator()(const html::basic_dom
 			if (matching_name == d.tag_name)
 			{
 				match_index += 1;
-				const int index = boost::lexical_cast<int>(matching_index);
+				const int index = std::stoi(matching_index);
 				if (match_index == index)
 					return true;
 				else
@@ -619,23 +587,23 @@ std::basic_string<char> basic_literal(const char* literal)
 	return literal;
 };
 
+template<>
+std::basic_string<wchar_t> basic_literal(const char* literal)
+{
+	return std::wstring(literal, literal + strlen(literal));
+};
+
+
 template<typename CharType>
 static inline std::basic_string<CharType> get_char_set(const std::basic_string<CharType> type, const std::basic_string<CharType> & default_charset)
 {
-	boost::match_results<const CharType*> what;
-
-	// 首先是 text/html; charset=XXX
-	boost::basic_regex<CharType, boost::regex_traits<CharType> > ex(basic_literal<CharType>("charset=([a-zA-Z0-9\\-_]+)"));
-
-	if( boost::regex_search( type.c_str(), what, ex ) )
-	{
-		return what[1];
+	std::match_results<const CharType*> m;
+	std::basic_regex<CharType, std::regex_traits<CharType>> ex(basic_literal<CharType>("charset=([a-zA-Z0-9\\-_]+)"), std::regex_constants::ECMAScript | std::regex_constants::icase);
+	if(std::regex_search(type.c_str(), m, ex)) {
+		return m[1];
+	} else if(std::regex_search(default_charset.c_str(), m, ex)) {
+		return m[1];
 	}
-	else if( boost::regex_search( default_charset.c_str(), what, ex ) )
-	{
-		return what[1];
-	}
-
 	return default_charset;
 }
 
@@ -650,7 +618,7 @@ std::basic_string<char> basic_dom<char>::basic_charset(const std::string& defaul
 		{
 			dom_walk(c, [this, &default_charset](std::shared_ptr<basic_dom<char>> i)
 			{
-				if (strcmp_ignore_case(i->get_attr("http-equiv"), "content-type"))
+				if (strcmp_ignore_case(i->get_attr("http-equiv"), std::string("content-type")))
 				{
 					auto content = i->get_attr("content");
 
@@ -684,7 +652,7 @@ std::basic_string<CharType> html::basic_dom<CharType>::to_plain_text() const
 {
 	std::basic_string<CharType> ret;
 
-	if (!strcmp_ignore_case(tag_name, script_tag_string<CharType>()) && tag_name != comment_tag_string<CharType>())
+	if (!strcmp_ignore_case(tag_name, std::basic_string<CharType>(script_tag_string<CharType>())) && tag_name != comment_tag_string<CharType>())
 	{
 		ret += content_text;
 
@@ -765,29 +733,20 @@ template std::basic_string<wchar_t> html::basic_dom<wchar_t>::to_html() const;
 #define CASE_BLANK case ' ': case '\r': case '\n': case '\t'
 
 template<typename CharType>
-void html::basic_dom<CharType>::html_parser(typename boost::coroutines::asymmetric_coroutine<const std::basic_string<CharType>*>::pull_type& html_page_source)
+void html::basic_dom<CharType>::html_parser(const std::basic_string<CharType>* html_page_source)
 {
 	int pre_state = 0, state = 0;
 
-	const std::basic_string<CharType> * _cur_str;
+	const std::basic_string<CharType> * _cur_str = html_page_source;
 	typename std::basic_string<CharType>::const_iterator _cur_str_it;
-
-	_cur_str = html_page_source.get();
-
 	_cur_str_it = _cur_str->begin();
 
-	auto getc = [&_cur_str, &_cur_str_it, &html_page_source](){
-
+	auto getc = [&_cur_str, &_cur_str_it]() -> CharType {
 		if (_cur_str_it!= _cur_str->end())
 		{
 			return *_cur_str_it++;
 		}
-
-		html_page_source();
-		_cur_str = html_page_source.get();
-		_cur_str_it = _cur_str->begin();
-
-		return *_cur_str_it++;
+		return 0;
 	};
 
 	auto get_escape = [&getc]() -> CharType
@@ -834,9 +793,7 @@ void html::basic_dom<CharType>::html_parser(typename boost::coroutines::asymmetr
 
 	bool ignore_blank = false;
 
-	while(html_page_source) // EOF 检测
-	{
-		// 获取一个字符
+	do {
 		c = getc();
 
 		switch(state)
@@ -858,8 +815,8 @@ void html::basic_dom<CharType>::html_parser(typename boost::coroutines::asymmetr
 								content_node->content_text = std::move(content);
 								current_ptr->children.push_back(std::move(content_node));
 
-								m_new_node_signal(tag_open, content_node);
-								m_new_node_signal(tag_close, content_node);
+								(*this->node_parser)(tag_open, content_node);
+								(*this->node_parser)(tag_close, content_node);
 							}
 						}
 					}
@@ -914,11 +871,11 @@ void html::basic_dom<CharType>::html_parser(typename boost::coroutines::asymmetr
 						current_ptr->children.push_back(new_dom);
 						if(new_dom->tag_name[0] != '!')
 							current_ptr = new_dom.get();
-						if (strcmp_ignore_case(current_ptr->tag_name, script_tag_string<CharType>()))
+						if (strcmp_ignore_case(current_ptr->tag_name, std::basic_string<CharType>(script_tag_string<CharType>())))
 						{
 							state = 20;
 						}
-						m_new_node_signal(tag_open, current_ptr->shared_from_this());
+						(*this->node_parser)(tag_open, current_ptr->shared_from_this());
 					}
 					break;
 					case '/':
@@ -945,12 +902,12 @@ void html::basic_dom<CharType>::html_parser(typename boost::coroutines::asymmetr
 						// tag 解析完毕, 正式进入 下一个 tag
 						pre_state = state;
 						state = 0;
-						m_new_node_signal(tag_open, current_ptr->shared_from_this());
+						(*this->node_parser)(tag_open, current_ptr->shared_from_this());
 						if ( current_ptr->tag_name[0] == '!')
 						{
-							m_new_node_signal(tag_close, current_ptr->shared_from_this());
+							(*this->node_parser)(tag_close, current_ptr->shared_from_this());
 							current_ptr = current_ptr->m_parent;
-						}else if (strcmp_ignore_case(current_ptr->tag_name, script_tag_string<CharType>()))
+						}else if (strcmp_ignore_case(current_ptr->tag_name, std::basic_string<CharType>(script_tag_string<CharType>())))
 						{
 							state = 20;
 						}
@@ -972,7 +929,7 @@ void html::basic_dom<CharType>::html_parser(typename boost::coroutines::asymmetr
 
 						if (current_ptr->m_parent)
 						{
-							m_new_node_signal(tag_close, current_ptr->shared_from_this());
+							(*this->node_parser)(tag_close, current_ptr->shared_from_this());
 							current_ptr = current_ptr->m_parent;
 						}else
 							current_ptr = this;
@@ -1015,14 +972,14 @@ void html::basic_dom<CharType>::html_parser(typename boost::coroutines::asymmetr
 						current_ptr->attributes[k];
 						k.clear();
 						v.clear();
-						m_new_node_signal(tag_open, current_ptr->shared_from_this());
+						(*this->node_parser)(tag_open, current_ptr->shared_from_this());
 						if ( current_ptr->tag_name[0] == '!')
 						{
- 							m_new_node_signal(tag_close, current_ptr->shared_from_this());
+ 							(*this->node_parser)(tag_close, current_ptr->shared_from_this());
 
 							current_ptr = current_ptr->m_parent;
 
-						}else if (strcmp_ignore_case(current_ptr->tag_name, script_tag_string<CharType>()))
+						}else if (strcmp_ignore_case(current_ptr->tag_name, std::basic_string<CharType>(script_tag_string<CharType>())))
 						{
 							state = 20;
 						}
@@ -1056,13 +1013,13 @@ void html::basic_dom<CharType>::html_parser(typename boost::coroutines::asymmetr
 						k.clear();
 						v.clear();
 
-						m_new_node_signal(tag_open, current_ptr->shared_from_this());
+						(*this->node_parser)(tag_open, current_ptr->shared_from_this());
 
 						if ( current_ptr->tag_name[0] == '!')
 						{
-							m_new_node_signal(tag_close, current_ptr->shared_from_this());
+							(*this->node_parser)(tag_close, current_ptr->shared_from_this());
 							current_ptr = current_ptr->m_parent;
-						}else if (strcmp_ignore_case(current_ptr->tag_name, script_tag_string<CharType>()))
+						}else if (strcmp_ignore_case(current_ptr->tag_name, std::basic_string<CharType>(script_tag_string<CharType>())))
 						{
 							state = 20;
 						}
@@ -1110,7 +1067,7 @@ void html::basic_dom<CharType>::html_parser(typename boost::coroutines::asymmetr
 							// 那就退出本 dom 节点
 							if (current_ptr->m_parent)
 							{
-								m_new_node_signal(tag_close, current_ptr->shared_from_this());
+								(*this->node_parser)(tag_close, current_ptr->shared_from_this());
 								current_ptr = current_ptr->m_parent;
 							}
 							else
@@ -1352,7 +1309,7 @@ void html::basic_dom<CharType>::html_parser(typename boost::coroutines::asymmetr
 							for (int i =0 ; i < 8 ;i++)
 								content.pop_back();
 							current_ptr->content_text = std::move(content);
-							m_new_node_signal(tag_close, current_ptr->shared_from_this());
+							(*this->node_parser)(tag_close, current_ptr->shared_from_this());
 							current_ptr = current_ptr->m_parent;
 						}
 					}break;
@@ -1362,10 +1319,10 @@ void html::basic_dom<CharType>::html_parser(typename boost::coroutines::asymmetr
 				}
 			}break;
 		}
-	}
+	} while(c);
 }
 
 #undef CASE_BLANK
 
-template void html::basic_dom<char>::html_parser(boost::coroutines::asymmetric_coroutine<const std::basic_string<char>*>::pull_type& html_page_source);
-template void html::basic_dom<wchar_t>::html_parser(boost::coroutines::asymmetric_coroutine<const std::basic_string<wchar_t>*>::pull_type& html_page_source);
+template void html::basic_dom<char>::html_parser(const std::basic_string<char>* html_page_source);
+template void html::basic_dom<wchar_t>::html_parser(const std::basic_string<wchar_t>* html_page_source);

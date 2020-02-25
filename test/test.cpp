@@ -2,7 +2,6 @@
 #include <html5.hpp>
 #include <fstream>
 #include <iostream>
-#include <boost/locale.hpp>
 
 
 const char msg_usage[] = "\nusage : %s <html file name> <selector>\n\n";
@@ -51,7 +50,7 @@ int main(int argc, char *argv[])
 
 		auto dom_text = cu_page[argv[2]].to_html();
 
-		std::cout << boost::locale::conv::between(dom_text, "UTF-8", charset) << std::endl;
+		std::cout << dom_text << std::endl;
 	}
 }
 

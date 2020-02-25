@@ -8,10 +8,7 @@
 #include <string>
 #include <vector>
 #include <map>
-
-#include <boost/coroutine/asymmetric_coroutine.hpp>
-#include <boost/signals2/signal.hpp>
-#include <boost/proto/traits.hpp>
+#include <regex>
 
 #ifdef _MSC_VER
 #	define noexcept throw()
@@ -134,12 +131,11 @@ namespace html{
 			void set_callback_fuction(std::function<void(tag_stage, std::shared_ptr<basic_dom<CharType>>)>&& cb);
 
 			basic_dom<CharType>* m_dom;
-			const basic_selector<CharType>* m_selector;
+			const basic_selector<CharType>* m_selector = nullptr;
 
 			const std::basic_string<CharType>& m_str;
 
 			std::function<void(tag_stage, std::shared_ptr<basic_dom<CharType>>)> m_callback;
-			boost::signals2::scoped_connection m_sig_connection;
 		};
 	}
 
@@ -165,13 +161,7 @@ namespace html{
 		detail::basic_dom_node_parser<CharType> append_partial_html(const std::basic_string<CharType>&);
 
 	public:
-		/*
-		传入的 select 语法，先是通过 basic_selector 的构造函数，生成一个 basic_selector 对象
-		解析完毕后，根据 basic_selector 的 condition 对象进行匹配。
-		只有解析成功以后。dom 对象这个容器才会被填充进对应的内容，否则全部都为空
-		*/
 		basic_dom<CharType>  operator[](const basic_selector<CharType>&) const;
-
 		std::basic_string<CharType> to_html() const;
 
 		std::basic_string<CharType> to_plain_text() const;
@@ -202,30 +192,21 @@ namespace html{
 		}
 
 	private:
-		void html_parser(typename boost::coroutines::asymmetric_coroutine<const std::basic_string<CharType>*>::pull_type & html_page_source);
-		typename boost::coroutines::asymmetric_coroutine<const std::basic_string<CharType>*>::push_type html_parser_feeder;
-		bool html_parser_feeder_inialized = false;
-
+		void html_parser(const std::basic_string<CharType>* html_page_source);
 		typedef std::shared_ptr<basic_dom<CharType>> basic_dom_ptr;
-		boost::signals2::signal<void(tag_stage, basic_dom_ptr)> m_new_node_signal;
-
  		std::basic_string<CharType> basic_charset(const std::string& default_charset) const;
 
 	protected:
 
 		void to_html(std::basic_ostream<CharType>*, int deep) const;
-
-
 		std::map<std::basic_string<CharType>, std::basic_string<CharType>> attributes;
 		std::basic_string<CharType> tag_name;
-
 		std::basic_string<CharType> content_text;
 		std::vector<basic_dom_ptr> children;
 		basic_dom<CharType>* m_parent;
-
+		detail::basic_dom_node_parser<CharType>* node_parser;
 		template<class T>
 		static void dom_walk(basic_dom_ptr d, T handler);
-
 		friend class basic_selector<CharType>;
 		friend class detail::basic_dom_node_parser<CharType>;
 	};
