@@ -73,32 +73,19 @@ template html::basic_selector<wchar_t>::basic_selector(std::basic_string<wchar_t
 template<typename CharType>
 bool strcmp_ignore_case(const std::basic_string<CharType>& a, const std::basic_string<CharType>& b)
 {
-    return std::equal(a.begin(), a.end(),
-                      b.begin(), b.end(),
-                      [](CharType a, CharType b) {
-                          return std::tolower(a) == std::tolower(b);
-                      });
+    unsigned int sz = a.size();
+    if (b.size() != sz)
+        return false;
+    for (unsigned int i = 0; i < sz; ++i)
+        if (tolower(a[i]) != tolower(b[i]))
+            return false;
+    return true;
 }
 
 
 template bool strcmp_ignore_case(const std::basic_string<char>& a, const std::basic_string<char>& b);
 template bool strcmp_ignore_case(const std::basic_string<wchar_t>& a, const std::basic_string<wchar_t>& b);
 
-
-/*
- * matcher 是分代的
- * matcher 会先执行一次匹配, 然后再从上一次执行的结果里执行匹配
- *
- * 比如对于 "div p" 这样的选择器, 是先匹配 div , 然后在结果中匹配 p
- *
- * 又比如 "div.p p" 先匹配 class=p 的 div 然后在结果中匹配 p
- *
- * 也就是说, 空格表示从上一次的结果里匹配.
- * 也就是说匹配的代用空格隔开.
- *
- * 同代的匹配条件里, 是属于 and 关系, 要同时满足
- * 比如 div.p 是同代的 2 个条件. 需要同时满足
- */
 template<typename CharType>
 void html::basic_selector<CharType>::build_matchers()
 {
@@ -134,7 +121,6 @@ void html::basic_selector<CharType>::build_matchers()
 	do
 	{
 		c = getc();
-#	define METACHAR  0 : case '.' : case '#'
 		switch(state)
 		{
 			case 0:
@@ -145,7 +131,7 @@ void html::basic_selector<CharType>::build_matchers()
 					case '\\':
 						matcher_str += get_escape();
 						break;
-					case METACHAR: case ' ':
+					case 0 : case '.' : case '#': case ' ': case '[': case ':':
 						{
 							if (!matcher_str.empty())
 							{
@@ -175,71 +161,44 @@ void html::basic_selector<CharType>::build_matchers()
 							}
 						}
 						break;
-					case '[':
-						state = '[';
-						break;
-					case ':':
-						state = c;
 					default:
 						matcher_str += c;
 				}
-				break;
-			case ' ':
-			{
-				m_matchers.push_back(std::move(matcher));
-				state = 0;
-			}
 			break;
 			case ':':
 			{
 				switch (c)
 				{
-				case METACHAR:
-					{
-						condition match_condition;
-						int tag_type = 0;
-						std::for_each(matcher_str.begin(), matcher_str.end(), [&match_condition, &tag_type](const CharType Word){
-							if (Word == ':')
-								tag_type = 1;
-							else if (Word == '(' || Word == ')')
-								tag_type = 2;
-							else if (0 == tag_type)
-								match_condition.matching_name += Word;
-							else if (1 == tag_type)
-								match_condition.matching_attr_operator += Word;
-							else if (2 == tag_type)
-								match_condition.matching_index += Word;
-						});
-	
-						if (match_condition.matching_attr_operator == operator_string_first<CharType>())
-						{
-							match_condition.matching_attr_operator = string_eq<CharType>();
-							match_condition.matching_index = '1';
-						}
-						else if (match_condition.matching_attr_operator == operator_string_last<CharType>())
-						{
-							match_condition.matching_attr_operator = string_eq<CharType>();
-						}
-						matcher.m_conditions.push_back(match_condition);
-						m_matchers.push_back(std::move(matcher));
-						matcher_str.clear();
-						state = 0;
-					}
+				case 0: case ' ': {
+					state = 0;
+					condition match_condition;
+					int tag_type = 0;
+					std::for_each(matcher_str.begin(), matcher_str.end(), [&match_condition, &tag_type](const CharType Word){
+						if (Word == '(' || Word == ')')
+							tag_type = 1;
+						else if (0 == tag_type)
+							match_condition.matching_attr_operator += Word;
+						else if (1 == tag_type)
+							match_condition.matching_index += Word;
+					});
+					matcher_str.clear();
+					matcher.m_conditions.push_back(match_condition);
+					m_matchers.push_back(std::move(matcher));
 					break;
+				}
 				default:
 					matcher_str += c;
 					break;
 				}
 
-			}break;
+			}
+			break;
 			case '[':
 			{
 				switch(c)
 				{
-					case ']': // 匹配结束
+					case ']': {
 						state = 0;
-					case ' ':
-					{
 						condition match_condition;
 						bool attr = false;
 						std::for_each(matcher_str.begin(), matcher_str.end(), [&match_condition, &attr](const CharType C){
@@ -261,9 +220,7 @@ void html::basic_selector<CharType>::build_matchers()
 			}
 			break;
 		}
-#	undef METACHAR
-
-	}while(c);
+	} while(c);
 }
 
 template void html::basic_selector<char>::build_matchers();
@@ -454,7 +411,7 @@ void html::basic_dom<CharType>::dom_walk(std::shared_ptr<html::basic_dom<CharTyp
 }
 
 template<typename CharType>
-bool html::basic_selector<CharType>::condition::operator()(const html::basic_dom<CharType>& d, int& match_index) const
+bool html::basic_selector<CharType>::condition::operator()(const html::basic_dom<CharType>& d) const
 {
 	if (!matching_tag_name.empty())
 	{
@@ -477,21 +434,30 @@ bool html::basic_selector<CharType>::condition::operator()(const html::basic_dom
 		}
 	}
 
-	if (!matching_name.empty())
+	if (matching_attr_operator == operator_string_first<CharType>())
 	{
-		if (matching_attr_operator == string_eq<CharType>())
-		{
-			if (matching_name == d.tag_name)
-			{
-				match_index += 1;
-				const int index = std::stoi(matching_index);
-				if (match_index == index)
-					return true;
-				else
-					return false;
-			}
-		}
+		return d.index == 0;
 	}
+
+	if (matching_attr_operator == operator_string_last<CharType>())
+	{
+		return d.index == d.m_parent->node_count - 1;
+	}
+
+	if (matching_attr_operator == string_eq<CharType>())
+	{
+		return d.index == std::stoi(matching_index);
+    }
+
+    if (matching_attr_operator == string_qt<CharType>())
+    {
+        return d.index > std::stoi(matching_index);
+    }
+
+    if (matching_attr_operator == string_lt<CharType>())
+    {
+        return d.index < std::stoi(matching_index);
+    }
 
 	if (!matching_attr.empty())
 	{
@@ -533,12 +499,9 @@ bool html::basic_selector<CharType>::selector_matcher::operator()(const html::ba
 	if (this->all_match)
 		return true;
 
-	bool all_match = false;
-	int  match_index = 0;
-
 	for (auto& c : m_conditions)
 	{
-		if(c(d, match_index))
+		if(c(d))
 		{
 			continue;
 		}
@@ -553,23 +516,33 @@ html::basic_dom<CharType> html::basic_dom<CharType>::operator[](const basic_sele
 {
 	html::basic_dom<CharType> selectee_dom;
 	html::basic_dom<CharType> matched_dom(*this);
+    int i = 0;
 
 	for (auto & matcher : selector_)
-	{
-		selectee_dom = std::move(matched_dom);
+    {
+        selectee_dom = std::move(matched_dom);
+        if(i++) {
+            html::basic_dom<CharType> tmp_dom;
+            for( auto & a : selectee_dom.children) {
+                for( auto & b : a->children) {
+                    tmp_dom.children.push_back(b);
+                }
+            }
+            selectee_dom = std::move(tmp_dom);
+        }
 
 		for( auto & c : selectee_dom.children)
-		{
-			dom_walk(c, [this, &matcher, &matched_dom, selector_](std::shared_ptr<html::basic_dom<CharType>> i)
-			{
-				if (matcher(*i))
-				{
-					matched_dom.children.push_back(i);
-					return false;		// 节点匹配成功，不再遍历子节点,跳转到下一个节点进行遍历
-				}
-				return true;			// 继续往子节点遍历。
-			});
-		}
+        {
+            dom_walk(c, [this, &matcher, &matched_dom](std::shared_ptr<html::basic_dom<CharType>> i)
+            {
+                if (matcher(*i))
+                {
+                    matched_dom.children.push_back(i);
+                    return false;
+                }
+                return true;
+            });
+        }
 	}
 
 	return matched_dom;
@@ -855,7 +828,7 @@ void html::basic_dom<CharType>::html_parser(const std::basic_string<CharType>* h
 							state = 2;
 							auto new_dom = std::make_shared<basic_dom<CharType>>(current_ptr);
 							new_dom->tag_name = std::move(tag);
-
+							new_dom->index = current_ptr->node_count++;
 							current_ptr->children.push_back(new_dom);
 							current_ptr = new_dom.get();
 						}
@@ -868,6 +841,7 @@ void html::basic_dom<CharType>::html_parser(const std::basic_string<CharType>* h
 
 						auto new_dom = std::make_shared<basic_dom<CharType>>(current_ptr);
 						new_dom->tag_name = std::move(tag);
+						new_dom->index = current_ptr->node_count++;
 						current_ptr->children.push_back(new_dom);
 						if(new_dom->tag_name[0] != '!')
 							current_ptr = new_dom.get();

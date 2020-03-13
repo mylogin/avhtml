@@ -45,14 +45,13 @@ namespace html{
 			std::basic_string<CharType> matching_tag_name;
 			std::basic_string<CharType> matching_id;
 			std::basic_string<CharType> matching_class;
-			std::basic_string<CharType> matching_name;
 			std::basic_string<CharType> matching_index;
 			std::basic_string<CharType> matching_attr;
 			std::basic_string<CharType> matching_attr_value;
 			std::basic_string<CharType> matching_attr_operator;
 
 			// 判断 basic_dom<CharType> 是否与当前的 condition 一致
-			bool operator()(const basic_dom<CharType>&, int&) const;
+			bool operator()(const basic_dom<CharType>&) const;
 		};
 
 		struct selector_matcher{
@@ -205,6 +204,8 @@ namespace html{
 		std::vector<basic_dom_ptr> children;
 		basic_dom<CharType>* m_parent;
 		detail::basic_dom_node_parser<CharType>* node_parser;
+		int index = 0;
+		int node_count = 0;
 		template<class T>
 		static void dom_walk(basic_dom_ptr d, T handler);
 		friend class basic_selector<CharType>;
