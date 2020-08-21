@@ -6,7 +6,6 @@
 
 const char msg_usage[] = "\nusage : %s <html file name> <selector>\n\n";
 
-// 如果你不希望跑命令行解析。那么你可以直接调用这个函数跑一下。
 void test();
 
 
@@ -44,13 +43,18 @@ int main(int argc, char *argv[])
 		(*instream) >> std::noskipws;
 
 		std::string test_page((std::istreambuf_iterator<char>(* instream)), std::istreambuf_iterator<char>());
-		cu_page.append_partial_html(test_page) ;//| "div" | [](html::tag_stage, std::shared_ptr<html::dom>){};
 
-		auto charset = cu_page.charset();
+		std::cout << "callback usage: " << std::endl;
 
-		auto dom_text = cu_page[argv[2]].to_html();
+		cu_page.append_partial_html(test_page) | argv[2] | [](html::tag_stage s, std::shared_ptr<html::dom> d) {
+			if(s == html::tag_open) {
+				std::cout << d->to_html() << std::endl;	
+			}
+		};
 
-		std::cout << dom_text << std::endl;
+		std::cout << std::endl << "basic usage: " << std::endl;
+	
+		std::cout << cu_page[argv[2]].to_html() << std::endl;
 	}
 }
 

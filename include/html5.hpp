@@ -98,8 +98,7 @@ namespace html{
 			basic_dom_node_parser(html::basic_dom<CharType>* domer, const std::basic_string<CharType>& str);
 			basic_dom_node_parser(basic_dom_node_parser&& other);
 
-		public: // only for signals2
-			basic_dom_node_parser(const basic_dom_node_parser&);
+		public: 
 			// called from dom
 			void operator()(tag_stage, std::shared_ptr<basic_dom<CharType>>);
 
@@ -190,6 +189,7 @@ namespace html{
 
 			return it->second;
 		}
+		std::basic_string<CharType> tag_name;
 
 	private:
 		void html_parser(const std::basic_string<CharType>* html_page_source);
@@ -200,7 +200,6 @@ namespace html{
 
 		void to_html(std::basic_ostream<CharType>*, int deep) const;
 		std::map<std::basic_string<CharType>, std::basic_string<CharType>> attributes;
-		std::basic_string<CharType> tag_name;
 		std::basic_string<CharType> content_text;
 		std::vector<basic_dom_ptr> children;
 		basic_dom<CharType>* m_parent;

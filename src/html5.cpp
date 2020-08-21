@@ -60,6 +60,9 @@ html::basic_selector<CharType>::basic_selector(const std::basic_string<CharType>
 	build_matchers();
 }
 
+template html::basic_selector<char>::basic_selector(const std::basic_string<char>& s);
+template html::basic_selector<wchar_t>::basic_selector(const std::basic_string<wchar_t>& s);
+
 template<typename CharType>
 html::basic_selector<CharType>::basic_selector(std::basic_string<CharType>&&s)
 	: m_select_string(s)
@@ -312,17 +315,6 @@ template html::detail::basic_dom_node_parser<char>::basic_dom_node_parser(html::
 template html::detail::basic_dom_node_parser<wchar_t>::basic_dom_node_parser(html::basic_dom<wchar_t>* domer, const std::basic_string<wchar_t>& str);
 
 template<typename CharType>
-html::detail::basic_dom_node_parser<CharType>::basic_dom_node_parser(const basic_dom_node_parser& other)
-	: m_str(other.m_str)
-	, m_callback(other.m_callback)
-{
-	m_dom = nullptr;
-}
-
-template html::detail::basic_dom_node_parser<char>::basic_dom_node_parser(const basic_dom_node_parser& other);
-template html::detail::basic_dom_node_parser<wchar_t>::basic_dom_node_parser(const basic_dom_node_parser& other);
-
-template<typename CharType>
 html::detail::basic_dom_node_parser<CharType>::basic_dom_node_parser(basic_dom_node_parser&& other)
 	: m_str(other.m_str)
 	, m_callback(std::move(other.m_callback))
@@ -349,26 +341,19 @@ template html::detail::basic_dom_node_parser<wchar_t>::~basic_dom_node_parser();
 template<typename CharType>
 void html::detail::basic_dom_node_parser<CharType>::operator()(tag_stage s, std::shared_ptr<basic_dom<CharType>> nodeptr)
 {
-	if (m_selector == nullptr)
-	{
-		if (m_callback)
-			m_callback(s, nodeptr);
+	if (!m_callback) {
 		return;
 	}
-
-	auto macher_it = m_selector->begin();
-
-	if ((*macher_it)(*nodeptr))
+	if (m_selector == nullptr)
 	{
-		++macher_it;
+		m_callback(s, nodeptr);
+		return;
 	}
-
-	if (macher_it == m_selector->end())
+	auto macher_it = m_selector->begin();
+	if ((*macher_it)(*nodeptr))
 	{
 		m_callback(s, nodeptr);
 	}
-
-	m_callback(s, nodeptr);
 }
 
 template<typename CharType>
@@ -787,9 +772,6 @@ void html::basic_dom<CharType>::html_parser(const std::basic_string<CharType>* h
 								auto content_node = std::make_shared<basic_dom<CharType>>(current_ptr);
 								content_node->content_text = std::move(content);
 								current_ptr->children.push_back(std::move(content_node));
-
-								(*this->node_parser)(tag_open, content_node);
-								(*this->node_parser)(tag_close, content_node);
 							}
 						}
 					}
